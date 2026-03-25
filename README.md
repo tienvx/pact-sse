@@ -19,6 +19,17 @@ retry: <timeout-in-ms>
 data: <event-data>
 ```
 
+## Prerequisites
+
+- Rust toolchain (stable)
+- Protocol Buffers compiler (`protoc`)
+
+Install `protoc`:
+
+- **Ubuntu/Debian**: `sudo apt-get install protobuf-compiler`
+- **macOS**: `brew install protobuf`
+- **Windows**: Download from https://github.com/protocolbuffers/protobuf/releases
+
 ## Building
 
 ```bash
