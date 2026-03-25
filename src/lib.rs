@@ -4,11 +4,9 @@ pub mod sse_content;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::collections::HashMap;
-use std::io::Write;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use env_logger::Env;
 use futures::Stream;
 use log::{debug, info};
 use maplit::hashmap;
@@ -17,12 +15,12 @@ use serde_json::Value;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
-use tonic::{Response, Status, transport::Server};
+use tonic::{Response, Status};
 use uuid::Uuid;
 
 use crate::proto::body::ContentTypeHint;
 use crate::proto::catalogue_entry::EntryType;
-use crate::proto::pact_plugin_server::{PactPlugin, PactPluginServer};
+use crate::proto::pact_plugin_server::PactPlugin;
 use crate::sse_content::{SseEvent, compare_sse_events, parse_sse_content, format_sse_content};
 
 pub type MockServerMap = Arc<Mutex<HashMap<String, MockServer>>>;
@@ -38,28 +36,6 @@ pub struct MockServer {
 #[derive(Debug, Default)]
 pub struct SsePactPlugin {
     pub mock_servers: MockServerMap,
-}
-
-fn to_object(value: &prost_types::Value) -> Value {
-    match &value.kind {
-        Some(prost_types::value::Kind::NullValue(_)) => Value::Null,
-        Some(prost_types::value::Kind::StringValue(s)) => Value::String(s.clone()),
-        Some(prost_types::value::Kind::NumberValue(n)) => serde_json::Number::from_f64(*n).unwrap_or_else(|| serde_json::Number::from(0)).into(),
-        Some(prost_types::value::Kind::BoolValue(b)) => Value::Bool(*b),
-        Some(prost_types::value::Kind::StructValue(s)) => {
-            let map: serde_json::Map<String, Value> = s
-                .fields
-                .iter()
-                .map(|(k, v)| (k.clone(), to_object(v)))
-                .collect();
-            Value::Object(map)
-        }
-        Some(prost_types::value::Kind::ListValue(l)) => {
-            let arr: Vec<Value> = l.values.iter().map(|v| to_object(v)).collect();
-            Value::Array(arr)
-        }
-        None => Value::Null,
-    }
 }
 
 #[tonic::async_trait]
@@ -216,29 +192,27 @@ impl PactPlugin for SsePactPlugin {
         let plugin_config = proto::PluginConfiguration::default();
 
         if let Value::Object(map) = config_map {
-            if let Some(response) = map.get("response") {
-                if let Value::Object(resp_map) = response {
-                    if let Some(Value::String(data)) = resp_map.get("data") {
-                        let events = SseEvent::parse(data);
-                        let sse_content = format_sse_content(&events);
+            if let Some(Value::Object(resp_map)) = map.get("response") {
+                if let Some(Value::String(data)) = resp_map.get("data") {
+                    let events = SseEvent::parse(data);
+                    let sse_content = format_sse_content(&events);
 
-                        interactions.push(proto::InteractionResponse {
-                            contents: Some(proto::Body {
-                                content_type: "text/event-stream".to_string(),
-                                content: Some(sse_content.into()),
-                                content_type_hint: ContentTypeHint::Default as i32,
-                            }),
-                            rules: HashMap::new(),
-                            generators: HashMap::new(),
-                            message_metadata: None,
-                            plugin_configuration: None,
-                            interaction_markup: String::new(),
-                            interaction_markup_type: proto::interaction_response::MarkupType::CommonMark as i32,
-                            part_name: "response".to_string(),
-                            metadata_rules: HashMap::new(),
-                            metadata_generators: HashMap::new(),
-                        });
-                    }
+                    interactions.push(proto::InteractionResponse {
+                        contents: Some(proto::Body {
+                            content_type: "text/event-stream".to_string(),
+                            content: Some(sse_content),
+                            content_type_hint: ContentTypeHint::Default as i32,
+                        }),
+                        rules: HashMap::new(),
+                        generators: HashMap::new(),
+                        message_metadata: None,
+                        plugin_configuration: None,
+                        interaction_markup: String::new(),
+                        interaction_markup_type: proto::interaction_response::MarkupType::CommonMark as i32,
+                        part_name: "response".to_string(),
+                        metadata_rules: HashMap::new(),
+                        metadata_generators: HashMap::new(),
+                    });
                 }
             }
         }
@@ -266,7 +240,7 @@ impl PactPlugin for SsePactPlugin {
         Ok(Response::new(proto::GenerateContentResponse {
             contents: Some(proto::Body {
                 content_type: "text/event-stream".to_string(),
-                content: Some(generated.into()),
+                content: Some(generated),
                 content_type_hint: ContentTypeHint::Default as i32,
             }),
         }))
@@ -443,13 +417,13 @@ pub struct TcpIncoming {
     pub inner: TcpListener,
 }
 
-impl Stream for TcpIncoming {
+  impl Stream for TcpIncoming {
     type Item = Result<TcpStream, std::io::Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         Pin::new(&mut self.inner)
             .poll_accept(cx)
             .map_ok(|(stream, _)| stream)
-            .map(|v| Some(v))
+            .map(Some)
     }
 }
