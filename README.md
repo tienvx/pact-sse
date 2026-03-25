@@ -38,6 +38,15 @@ cargo build --release
 
 The binary will be available at `target/release/pact-sse-plugin`.
 
+### Useful Commands
+
+```bash
+cargo test       # Run tests
+cargo clippy     # Run linter
+cargo fmt        # Format code
+cargo clean      # Clean build artifacts
+```
+
 ## Installation
 
 1. Build the plugin:
