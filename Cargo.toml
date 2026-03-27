@@ -21,6 +21,9 @@ anyhow = "1.0.75"
 hyper = "0.14"
 http = "0.2"
 regex = "1.10"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
 
 [build-dependencies]
 tonic-build = "0.10.2"

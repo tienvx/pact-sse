@@ -8,7 +8,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use futures::Stream;
-use log::{debug, info};
 use maplit::hashmap;
 use pact_models::matchingrules::{RuleList, RuleLogic};
 use serde_json::Value;
@@ -45,8 +44,8 @@ impl PactPlugin for SsePactPlugin {
         request: tonic::Request<proto::InitPluginRequest>,
     ) -> Result<tonic::Response<proto::InitPluginResponse>, Status> {
         let message = request.get_ref();
-        debug!(
-            "Init request from {}/{}",
+        tracing::info!(
+            "InitPlugin: implementation={}/{}",
             message.implementation, message.version
         );
 
@@ -77,9 +76,10 @@ impl PactPlugin for SsePactPlugin {
 
     async fn update_catalogue(
         &self,
-        _request: tonic::Request<proto::Catalogue>,
+        request: tonic::Request<proto::Catalogue>,
     ) -> Result<tonic::Response<()>, Status> {
-        debug!("Update catalogue request, ignoring");
+        let catalogue = request.get_ref();
+        tracing::debug!("UpdateCatalogue: {} entries", catalogue.catalogue.len());
         Ok(Response::new(()))
     }
 
@@ -88,7 +88,8 @@ impl PactPlugin for SsePactPlugin {
         request: tonic::Request<proto::CompareContentsRequest>,
     ) -> Result<tonic::Response<proto::CompareContentsResponse>, Status> {
         let request = request.get_ref();
-        debug!("compare_contents request");
+        tracing::info!("CompareContents: expected={:?}, actual={:?}",
+            request.expected.is_some(), request.actual.is_some());
 
         match (request.expected.as_ref(), request.actual.as_ref()) {
             (Some(expected), Some(actual)) => {
@@ -196,8 +197,8 @@ impl PactPlugin for SsePactPlugin {
         &self,
         request: tonic::Request<proto::ConfigureInteractionRequest>,
     ) -> Result<tonic::Response<proto::ConfigureInteractionResponse>, Status> {
-        debug!(
-            "configure_interaction request for '{}'",
+        tracing::debug!(
+            "ConfigureInteraction: content_type='{}'",
             request.get_ref().content_type
         );
 
@@ -245,14 +246,19 @@ impl PactPlugin for SsePactPlugin {
         &self,
         request: tonic::Request<proto::GenerateContentRequest>,
     ) -> Result<tonic::Response<proto::GenerateContentResponse>, Status> {
-        debug!("generate_content request");
+        let req = request.get_ref();
+        tracing::info!("GenerateContent: test_mode={}", req.test_mode);
 
-        let contents = request.get_ref().contents.as_ref().unwrap();
+        let contents = req.contents.as_ref().unwrap();
         let content_bytes = contents.content.as_ref().unwrap();
         let content_str = String::from_utf8_lossy(content_bytes);
+        tracing::debug!("GenerateContent: input length={}", content_str.len());
 
         let events = SseEvent::parse(&content_str);
+        tracing::info!("GenerateContent: parsed {} events", events.len());
+
         let generated = format_sse_content(&events);
+        tracing::debug!("GenerateContent: generated {} bytes", generated.len());
 
         Ok(Response::new(proto::GenerateContentResponse {
             contents: Some(proto::Body {
@@ -268,11 +274,14 @@ impl PactPlugin for SsePactPlugin {
         request: tonic::Request<proto::StartMockServerRequest>,
     ) -> Result<tonic::Response<proto::StartMockServerResponse>, Status> {
         let req = request.get_ref();
+        tracing::info!("StartMockServer: host={:?}, port={}, tls={}",
+            req.host_interface, req.port, req.tls);
+        tracing::debug!("StartMockServer: pact JSON length={}", req.pact.len());
         let pact = req.pact.clone();
         let host_interface = req.host_interface.clone();
         let port = if req.port == 0 { 0 } else { req.port };
-        info!(
-            "start_mock_server request: port={}, pact={}",
+        tracing::info!(
+            "StartMockServer: port={}, pact_preview={}",
             port,
             &pact[..pact.len().min(100)]
         );
@@ -324,20 +333,23 @@ impl PactPlugin for SsePactPlugin {
         request: tonic::Request<proto::ShutdownMockServerRequest>,
     ) -> Result<tonic::Response<proto::ShutdownMockServerResponse>, Status> {
         let server_key = request.get_ref().server_key.clone();
-        debug!("shutdown_mock_server request for key: {}", server_key);
+        tracing::info!("ShutdownMockServer: server_key={}", server_key);
 
         let servers = self.mock_servers.lock().await;
-        if let Some(server) = servers.get(&server_key) {
-            Ok(Response::new(proto::ShutdownMockServerResponse {
+        let result = if let Some(server) = servers.get(&server_key) {
+            tracing::info!("ShutdownMockServer: found server with {} results", server.results.len());
+            proto::ShutdownMockServerResponse {
                 ok: server.results.is_empty(),
                 results: server.results.clone(),
-            }))
+            }
         } else {
-            Ok(Response::new(proto::ShutdownMockServerResponse {
+            tracing::warn!("ShutdownMockServer: server not found: {}", server_key);
+            proto::ShutdownMockServerResponse {
                 ok: true,
                 results: Vec::new(),
-            }))
-        }
+            }
+        };
+        Ok(Response::new(result))
     }
 
     async fn get_mock_server_results(
@@ -345,26 +357,32 @@ impl PactPlugin for SsePactPlugin {
         request: tonic::Request<proto::MockServerRequest>,
     ) -> Result<tonic::Response<proto::MockServerResults>, Status> {
         let server_key = request.get_ref().server_key.clone();
-        debug!("get_mock_server_results request for key: {}", server_key);
+        tracing::info!("GetMockServerResults: server_key={}", server_key);
 
         let servers = self.mock_servers.lock().await;
-        if let Some(server) = servers.get(&server_key) {
-            Ok(Response::new(proto::MockServerResults {
+        let result = if let Some(server) = servers.get(&server_key) {
+            tracing::debug!("GetMockServerResults: found server with {} results", server.results.len());
+            proto::MockServerResults {
                 ok: server.results.is_empty(),
                 results: server.results.clone(),
-            }))
+            }
         } else {
-            Ok(Response::new(proto::MockServerResults {
+            tracing::warn!("GetMockServerResults: server not found: {}", server_key);
+            proto::MockServerResults {
                 ok: true,
                 results: Vec::new(),
-            }))
-        }
+            }
+        };
+        Ok(Response::new(result))
     }
 
     async fn prepare_interaction_for_verification(
         &self,
-        _request: tonic::Request<proto::VerificationPreparationRequest>,
+        request: tonic::Request<proto::VerificationPreparationRequest>,
     ) -> Result<tonic::Response<proto::VerificationPreparationResponse>, Status> {
+        let req = request.get_ref();
+        tracing::info!("PrepareInteractionForVerification: interaction_key={}, pact_length={}",
+            req.interaction_key, req.pact.len());
         Ok(Response::new(proto::VerificationPreparationResponse {
             response: Some(
                 proto::verification_preparation_response::Response::InteractionData(
@@ -383,14 +401,18 @@ impl PactPlugin for SsePactPlugin {
 
     async fn verify_interaction(
         &self,
-        _request: tonic::Request<proto::VerifyInteractionRequest>,
+        request: tonic::Request<proto::VerifyInteractionRequest>,
     ) -> Result<tonic::Response<proto::VerifyInteractionResponse>, Status> {
+        let req = request.get_ref();
+        tracing::info!("VerifyInteraction: interaction_key={}, pact_length={}",
+            req.interaction_key, req.pact.len());
         todo!("verify_interaction not yet implemented")
     }
 }
 
 async fn run_sse_mock_server(listener: TcpListener, server_key: String, pact: String) {
-    info!("SSE mock server started, handling connections");
+    tracing::info!("SSE mock server started: server_key={}, pact_length={}",
+        server_key, pact.len());
 
     loop {
         match listener.accept().await {
@@ -413,9 +435,11 @@ async fn run_sse_mock_server(listener: TcpListener, server_key: String, pact: St
 
 async fn handle_sse_connection(
     stream: TcpStream,
-    _server_key: String,
-    _pact: &str,
+    server_key: String,
+    pact: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    tracing::debug!("HandleSSEConnection: server_key={}, pact_length={}",
+        server_key, pact.len());
     let (read_half, mut write_half) = stream.into_split();
 
     let response_headers = "HTTP/1.1 200 OK\r\n\
@@ -426,6 +450,7 @@ async fn handle_sse_connection(
 
     write_half.write_all(response_headers.as_bytes()).await?;
     write_half.flush().await?;
+    tracing::debug!("HandleSSEConnection: sent response headers");
 
     let default_event = SseEvent {
         event: Some("message".to_string()),
@@ -434,13 +459,16 @@ async fn handle_sse_connection(
         retry: Some(3000),
     };
 
+    let event_str = default_event.format();
+    tracing::debug!("HandleSSEConnection: sending SSE event: {}", event_str);
     write_half
-        .write_all(default_event.format().as_bytes())
+        .write_all(event_str.as_bytes())
         .await?;
     write_half.flush().await?;
 
     let _ = read_half;
 
+    tracing::debug!("HandleSSEConnection: connection closed");
     Ok(())
 }
 
