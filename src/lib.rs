@@ -1,26 +1,28 @@
 pub mod proto;
 pub mod sse_content;
+pub mod server;
+pub mod tcp;
+mod mock_server;
+pub mod built_info {
+    include!(concat!(env!("OUT_DIR"), "/built.rs"));
+}
 
-use core::pin::Pin;
-use core::task::{Context, Poll};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use futures::Stream;
 use maplit::hashmap;
 use pact_models::matchingrules::{RuleList, RuleLogic};
 use serde_json::Value;
-use tokio::io::AsyncWriteExt;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tonic::{Response, Status};
 use uuid::Uuid;
 
 use crate::proto::body::ContentTypeHint;
 use crate::proto::catalogue_entry::EntryType;
-use crate::proto::pact_plugin_server::PactPlugin;
 use crate::sse_content::{compare_sse_events, format_sse_content, parse_sse_content, SseEvent};
+use crate::server::SsePactPlugin;
 
 pub type MockServerMap = Arc<Mutex<HashMap<String, MockServer>>>;
 
@@ -32,13 +34,8 @@ pub struct MockServer {
     pub results: Vec<proto::MockServerResult>,
 }
 
-#[derive(Debug, Default)]
-pub struct SsePactPlugin {
-    pub mock_servers: MockServerMap,
-}
-
 #[tonic::async_trait]
-impl PactPlugin for SsePactPlugin {
+impl proto::pact_plugin_server::PactPlugin for server::SsePactPlugin {
     async fn init_plugin(
         &self,
         request: tonic::Request<proto::InitPluginRequest>,
@@ -308,13 +305,14 @@ impl PactPlugin for SsePactPlugin {
         };
 
         let server_key_for_map = server_key.clone();
+        let mock_servers_clone = self.mock_servers.clone();
         self.mock_servers
             .lock()
             .await
             .insert(server_key_for_map, mock_server);
 
         tokio::spawn(async move {
-            run_sse_mock_server(listener, server_key, pact).await;
+            crate::mock_server::run_sse_mock_server(listener, server_key, pact, mock_servers_clone).await;
         });
 
         Ok(Response::new(proto::StartMockServerResponse {
@@ -407,82 +405,5 @@ impl PactPlugin for SsePactPlugin {
         tracing::info!("VerifyInteraction: interaction_key={}, pact_length={}",
             req.interaction_key, req.pact.len());
         todo!("verify_interaction not yet implemented")
-    }
-}
-
-async fn run_sse_mock_server(listener: TcpListener, server_key: String, pact: String) {
-    tracing::info!("SSE mock server started: server_key={}, pact_length={}",
-        server_key, pact.len());
-
-    loop {
-        match listener.accept().await {
-            Ok((stream, _addr)) => {
-                let server_key = server_key.clone();
-                let pact = pact.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = handle_sse_connection(stream, server_key, &pact).await {
-                        eprintln!("Error handling SSE connection: {}", e);
-                    }
-                });
-            }
-            Err(e) => {
-                eprintln!("Failed to accept connection: {}", e);
-                break;
-            }
-        }
-    }
-}
-
-async fn handle_sse_connection(
-    stream: TcpStream,
-    server_key: String,
-    pact: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    tracing::debug!("HandleSSEConnection: server_key={}, pact_length={}",
-        server_key, pact.len());
-    let (read_half, mut write_half) = stream.into_split();
-
-    let response_headers = "HTTP/1.1 200 OK\r\n\
-        Content-Type: text/event-stream\r\n\
-        Cache-Control: no-cache\r\n\
-        Connection: keep-alive\r\n\
-        \r\n";
-
-    write_half.write_all(response_headers.as_bytes()).await?;
-    write_half.flush().await?;
-    tracing::debug!("HandleSSEConnection: sent response headers");
-
-    let default_event = SseEvent {
-        event: Some("message".to_string()),
-        id: None,
-        data: "Hello from SSE mock server!".to_string(),
-        retry: Some(3000),
-    };
-
-    let event_str = default_event.format();
-    tracing::debug!("HandleSSEConnection: sending SSE event: {}", event_str);
-    write_half
-        .write_all(event_str.as_bytes())
-        .await?;
-    write_half.flush().await?;
-
-    let _ = read_half;
-
-    tracing::debug!("HandleSSEConnection: connection closed");
-    Ok(())
-}
-
-pub struct TcpIncoming {
-    pub inner: TcpListener,
-}
-
-impl Stream for TcpIncoming {
-    type Item = Result<TcpStream, std::io::Error>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Pin::new(&mut self.inner)
-            .poll_accept(cx)
-            .map_ok(|(stream, _)| stream)
-            .map(Some)
     }
 }
