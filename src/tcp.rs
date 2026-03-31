@@ -1,9 +1,9 @@
 use core::pin::Pin;
 use core::task::{Context, Poll};
+use futures::Stream;
 use std::io;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
-use futures::Stream;
 
 pub struct TcpIncoming {
     pub inner: TcpListener,

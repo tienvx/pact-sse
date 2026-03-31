@@ -3,11 +3,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-mod proto {
-    tonic::include_proto!("io.pact.plugin");
-}
-
-use proto::{Body, CompareContentsRequest};
+use pact_plugin_driver::proto::{self, Body, CompareContentsRequest};
 
 /// Test that compare_contents handles matching SSE content
 #[test]

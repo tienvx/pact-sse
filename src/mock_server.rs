@@ -2,7 +2,6 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 
-use crate::proto;
 use crate::sse_content::SseEvent;
 use crate::MockServerMap;
 
@@ -25,7 +24,9 @@ pub async fn run_sse_mock_server(
                 let pact = pact.clone();
                 let mock_servers = mock_servers.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_sse_connection(stream, server_key, &pact, &mock_servers).await {
+                    if let Err(e) =
+                        handle_sse_connection(stream, server_key, &pact, &mock_servers).await
+                    {
                         tracing::error!("Error handling SSE connection: {}", e);
                     }
                 });
@@ -42,7 +43,7 @@ async fn handle_sse_connection(
     stream: TcpStream,
     server_key: String,
     pact: &str,
-    mock_servers: &MockServerMap,
+    _mock_servers: &MockServerMap,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing::debug!(
         "HandleSSEConnection: server_key={}, pact_length={}",

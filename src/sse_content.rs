@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use pact_matching::matchingrules::Matches;
 use pact_models::matchingrules::RuleList;
 use std::collections::HashMap;

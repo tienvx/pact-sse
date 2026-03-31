@@ -1,8 +1,7 @@
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::sse_content::SseEvent;
 use crate::MockServerMap;
 
 #[derive(Debug)]
@@ -19,5 +18,11 @@ impl SsePactPlugin {
 
     pub fn host_to_bind_to(&self) -> Option<String> {
         None
+    }
+}
+
+impl Default for SsePactPlugin {
+    fn default() -> Self {
+        Self::new()
     }
 }

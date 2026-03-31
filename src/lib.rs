@@ -1,10 +1,36 @@
-pub mod proto;
-pub mod sse_content;
-pub mod server;
-pub mod tcp;
+pub use pact_plugin_driver::proto;
 mod mock_server;
+pub mod server;
+pub mod sse_content;
+pub mod tcp;
 pub mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
+}
+
+use prost_types::value::Kind;
+use serde_json::{json, Value};
+
+fn to_object(s: &prost_types::Struct) -> Value {
+    Value::Object(
+        s.fields
+            .iter()
+            .map(|(k, v)| (k.clone(), to_value(v)))
+            .collect(),
+    )
+}
+
+fn to_value(v: &prost_types::Value) -> Value {
+    match &v.kind {
+        Some(kind) => match kind {
+            Kind::NullValue(_) => Value::Null,
+            Kind::NumberValue(n) => json!(n),
+            Kind::StringValue(s) => Value::String(s.clone()),
+            Kind::BoolValue(b) => Value::Bool(*b),
+            Kind::StructValue(s) => to_object(s),
+            Kind::ListValue(l) => Value::Array(l.values.iter().map(to_value).collect()),
+        },
+        None => Value::Null,
+    }
 }
 
 use std::collections::HashMap;
@@ -13,7 +39,6 @@ use std::sync::Arc;
 
 use maplit::hashmap;
 use pact_models::matchingrules::{RuleList, RuleLogic};
-use serde_json::Value;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tonic::{Response, Status};
@@ -22,7 +47,6 @@ use uuid::Uuid;
 use crate::proto::body::ContentTypeHint;
 use crate::proto::catalogue_entry::EntryType;
 use crate::sse_content::{compare_sse_events, format_sse_content, parse_sse_content, SseEvent};
-use crate::server::SsePactPlugin;
 
 pub type MockServerMap = Arc<Mutex<HashMap<String, MockServer>>>;
 
@@ -43,7 +67,8 @@ impl proto::pact_plugin_server::PactPlugin for server::SsePactPlugin {
         let message = request.get_ref();
         tracing::info!(
             "InitPlugin: implementation={}/{}",
-            message.implementation, message.version
+            message.implementation,
+            message.version
         );
 
         Ok(Response::new(proto::InitPluginResponse {
@@ -85,8 +110,11 @@ impl proto::pact_plugin_server::PactPlugin for server::SsePactPlugin {
         request: tonic::Request<proto::CompareContentsRequest>,
     ) -> Result<tonic::Response<proto::CompareContentsResponse>, Status> {
         let request = request.get_ref();
-        tracing::info!("CompareContents: expected={:?}, actual={:?}",
-            request.expected.is_some(), request.actual.is_some());
+        tracing::info!(
+            "CompareContents: expected={:?}, actual={:?}",
+            request.expected.is_some(),
+            request.actual.is_some()
+        );
 
         match (request.expected.as_ref(), request.actual.as_ref()) {
             (Some(expected), Some(actual)) => {
@@ -112,7 +140,7 @@ impl proto::pact_plugin_server::PactPlugin for server::SsePactPlugin {
                             RuleList::empty(RuleLogic::And),
                             |mut list, rule| {
                                 if let Some(values) = &rule.values {
-                                    let obj = proto::to_object(values);
+                                    let obj = to_object(values);
                                     if let Value::Object(mut map) = obj {
                                         map.insert(
                                             "match".to_string(),
@@ -200,7 +228,7 @@ impl proto::pact_plugin_server::PactPlugin for server::SsePactPlugin {
         );
 
         let contents_config = request.get_ref().contents_config.as_ref().unwrap();
-        let config_map = proto::to_object(contents_config);
+        let config_map = to_object(contents_config);
 
         let mut interactions = Vec::new();
         let plugin_config = proto::PluginConfiguration::default();
@@ -271,8 +299,12 @@ impl proto::pact_plugin_server::PactPlugin for server::SsePactPlugin {
         request: tonic::Request<proto::StartMockServerRequest>,
     ) -> Result<tonic::Response<proto::StartMockServerResponse>, Status> {
         let req = request.get_ref();
-        tracing::info!("StartMockServer: host={:?}, port={}, tls={}",
-            req.host_interface, req.port, req.tls);
+        tracing::info!(
+            "StartMockServer: host={:?}, port={}, tls={}",
+            req.host_interface,
+            req.port,
+            req.tls
+        );
         tracing::debug!("StartMockServer: pact JSON length={}", req.pact.len());
         let pact = req.pact.clone();
         let host_interface = req.host_interface.clone();
@@ -312,7 +344,8 @@ impl proto::pact_plugin_server::PactPlugin for server::SsePactPlugin {
             .insert(server_key_for_map, mock_server);
 
         tokio::spawn(async move {
-            crate::mock_server::run_sse_mock_server(listener, server_key, pact, mock_servers_clone).await;
+            crate::mock_server::run_sse_mock_server(listener, server_key, pact, mock_servers_clone)
+                .await;
         });
 
         Ok(Response::new(proto::StartMockServerResponse {
@@ -335,7 +368,10 @@ impl proto::pact_plugin_server::PactPlugin for server::SsePactPlugin {
 
         let servers = self.mock_servers.lock().await;
         let result = if let Some(server) = servers.get(&server_key) {
-            tracing::info!("ShutdownMockServer: found server with {} results", server.results.len());
+            tracing::info!(
+                "ShutdownMockServer: found server with {} results",
+                server.results.len()
+            );
             proto::ShutdownMockServerResponse {
                 ok: server.results.is_empty(),
                 results: server.results.clone(),
@@ -359,7 +395,10 @@ impl proto::pact_plugin_server::PactPlugin for server::SsePactPlugin {
 
         let servers = self.mock_servers.lock().await;
         let result = if let Some(server) = servers.get(&server_key) {
-            tracing::debug!("GetMockServerResults: found server with {} results", server.results.len());
+            tracing::debug!(
+                "GetMockServerResults: found server with {} results",
+                server.results.len()
+            );
             proto::MockServerResults {
                 ok: server.results.is_empty(),
                 results: server.results.clone(),
@@ -379,8 +418,11 @@ impl proto::pact_plugin_server::PactPlugin for server::SsePactPlugin {
         request: tonic::Request<proto::VerificationPreparationRequest>,
     ) -> Result<tonic::Response<proto::VerificationPreparationResponse>, Status> {
         let req = request.get_ref();
-        tracing::info!("PrepareInteractionForVerification: interaction_key={}, pact_length={}",
-            req.interaction_key, req.pact.len());
+        tracing::info!(
+            "PrepareInteractionForVerification: interaction_key={}, pact_length={}",
+            req.interaction_key,
+            req.pact.len()
+        );
         Ok(Response::new(proto::VerificationPreparationResponse {
             response: Some(
                 proto::verification_preparation_response::Response::InteractionData(
@@ -402,8 +444,11 @@ impl proto::pact_plugin_server::PactPlugin for server::SsePactPlugin {
         request: tonic::Request<proto::VerifyInteractionRequest>,
     ) -> Result<tonic::Response<proto::VerifyInteractionResponse>, Status> {
         let req = request.get_ref();
-        tracing::info!("VerifyInteraction: interaction_key={}, pact_length={}",
-            req.interaction_key, req.pact.len());
+        tracing::info!(
+            "VerifyInteraction: interaction_key={}, pact_length={}",
+            req.interaction_key,
+            req.pact.len()
+        );
         todo!("verify_interaction not yet implemented")
     }
 }
