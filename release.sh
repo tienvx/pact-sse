@@ -3,12 +3,10 @@
 set -e
 set -x
 
-RUST_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd )"
-
-source "$RUST_DIR/scripts/gzip-and-sum.sh"
-ARTIFACTS_DIR=${ARTIFACTS_DIR:-"$RUST_DIR/release_artifacts"}
+source "$(dirname "$0")/scripts/gzip-and-sum.sh"
+ARTIFACTS_DIR=${ARTIFACTS_DIR:-"$PWD/release_artifacts"}
 mkdir -p "$ARTIFACTS_DIR"
-export CARGO_TARGET_DIR=${CARO_TARGET_DIR:-"$RUST_DIR/target"}
+export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-"$PWD/target"}
 
 if [ $# -lt 1 ]
 then
@@ -51,7 +49,6 @@ build_linux_aarch64() {
 }
 # Build the x86_64 darwin release
 build_macos_x86_64() {
-    #cargo clean
     cargo build --target x86_64-apple-darwin "${cargo_flags[@]}"
 
     if [[ "${cargo_flags[*]}" =~ "--release" ]]; then
@@ -66,7 +63,6 @@ build_macos_x86_64() {
 
 # Build the aarch64 darwin release
 build_macos_aarch64() {
-    #cargo clean
     cargo build --target aarch64-apple-darwin "${cargo_flags[@]}"
 
     if [[ "${cargo_flags[*]}" =~ "--release" ]]; then
@@ -81,7 +77,6 @@ build_macos_aarch64() {
 
 # Build the x86_64 windows release
 build_windows_x86_64() {
-    #cargo clean
     cargo build --target x86_64-pc-windows-msvc "${cargo_flags[@]}"
 
     # If --release in cargo flags, then gzip and sum the release artifacts
@@ -94,7 +89,6 @@ build_windows_x86_64() {
 
 # Build the aarch64 windows release
 build_windows_aarch64() {
-    #cargo clean
     cargo build --target aarch64-pc-windows-msvc "${cargo_flags[@]}"
 
     if [[ "${cargo_flags[*]}" =~ "--release" ]]; then
