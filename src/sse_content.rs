@@ -1,13 +1,13 @@
 use anyhow::anyhow;
 use bytes::Bytes;
+use either::Either;
 use log::debug;
 use maplit::hashmap;
-use either::Either;
+use pact_matching::matchers::Matches;
 use pact_models::bodies::OptionalBody;
 use pact_models::generators::{GenerateValue, Generator, NoopVariantMatcher, VariantMatcher};
 use pact_models::matchingrules::RuleList;
 use pact_models::prelude::ContentType;
-use pact_matching::matchers::Matches;
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap};
 use tonic::{Request, Response};
@@ -57,8 +57,10 @@ fn parse_sse_content(content: &str) -> Vec<SseEvent> {
     for line in content.lines() {
         let line = line.trim_end_matches('\r');
         if line.is_empty() {
-            if current.id.is_some() || current.event_type.is_some()
-                || current.data.is_some() || current.retry.is_some()
+            if current.id.is_some()
+                || current.event_type.is_some()
+                || current.data.is_some()
+                || current.retry.is_some()
             {
                 events.push(current);
                 current = SseEvent {
@@ -84,8 +86,10 @@ fn parse_sse_content(content: &str) -> Vec<SseEvent> {
         }
     }
 
-    if current.id.is_some() || current.event_type.is_some()
-        || current.data.is_some() || current.retry.is_some()
+    if current.id.is_some()
+        || current.event_type.is_some()
+        || current.data.is_some()
+        || current.retry.is_some()
     {
         events.push(current);
     }
@@ -98,7 +102,12 @@ pub fn setup_sse_contents(
 ) -> anyhow::Result<Response<proto::ConfigureInteractionResponse>> {
     match &request.get_ref().contents_config {
         Some(config) => {
-            let mut events: Vec<Option<(pact_models::matchingrules::expressions::MatchingRuleDefinition, FieldKey)>> = Vec::new();
+            let mut events: Vec<
+                Option<(
+                    pact_models::matchingrules::expressions::MatchingRuleDefinition,
+                    FieldKey,
+                )>,
+            > = Vec::new();
 
             for (key, value) in &config.fields {
                 let field_key = parse_field(key)?;
@@ -115,55 +124,66 @@ pub fn setup_sse_contents(
             let mut generators = hashmap! {};
             let mut markdown = String::from("# SSE Events\n\n|type|data|\n|---|---|\n");
 
-          for (md, field_key) in events.iter().flatten() {
-               let event_type = field_key.event_type.clone().unwrap_or_default();
-                    if !event_type.is_empty() {
-                        sse_output.push_str(&format!("event:{}\n", event_type));
-                    }
-                    sse_output.push_str(&format!("data:{}\n", md.value));
-                    sse_output.push('\n');
+            for (md, field_key) in events.iter().flatten() {
+                let event_type = field_key.event_type.clone().unwrap_or_default();
+                if !event_type.is_empty() {
+                    sse_output.push_str(&format!("event:{}\n", event_type));
+                }
+                sse_output.push_str(&format!("data:{}\n", md.value));
+                sse_output.push('\n');
 
-                    let path = field_key.path();
-                    let rule_type = md.rules.first().and_then(|r| {
+                let path = field_key.path();
+                let rule_type = md
+                    .rules
+                    .first()
+                    .and_then(|r| {
                         if let Either::Left(r) = r {
                             Some(r.name())
                         } else {
                             None
                         }
-                    }).unwrap_or_else(|| "type".to_string());
+                    })
+                    .unwrap_or_else(|| "type".to_string());
 
-                    let mut rule_values: BTreeMap<String, prost_types::Value> = BTreeMap::new();
-                    if let Some(Either::Left(r)) = md.rules.first() {
-                        for (k, v) in r.values() {
-                            rule_values.insert(k.to_string(), to_value(&v));
-                        }
+                let mut rule_values: BTreeMap<String, prost_types::Value> = BTreeMap::new();
+                if let Some(Either::Left(r)) = md.rules.first() {
+                    for (k, v) in r.values() {
+                        rule_values.insert(k.to_string(), to_value(&v));
                     }
-                    rule_values.insert("match".to_string(), to_value(&Value::String(rule_type.clone())));
+                }
+                rule_values.insert(
+                    "match".to_string(),
+                    to_value(&Value::String(rule_type.clone())),
+                );
 
-                    rules.insert(path.clone(), proto::MatchingRules {
+                rules.insert(
+                    path.clone(),
+                    proto::MatchingRules {
                         rule: vec![proto::MatchingRule {
                             r#type: rule_type,
                             values: Some(prost_types::Struct {
-                                fields: rule_values
-                            })
-                        }]
-                    });
+                                fields: rule_values,
+                            }),
+                        }],
+                    },
+                );
 
-                    if let Some(ref gen) = md.generator {
-                        let mut gen_values: BTreeMap<String, prost_types::Value> = BTreeMap::new();
-                        for (k, v) in gen.values() {
-                            gen_values.insert(k.to_string(), to_value(&v));
-                        }
-                        generators.insert(path, proto::Generator {
-                            r#type: gen.name(),
-                            values: Some(prost_types::Struct {
-                                fields: gen_values
-                            })
-                        });
+                if let Some(ref gen) = md.generator {
+                    let mut gen_values: BTreeMap<String, prost_types::Value> = BTreeMap::new();
+                    for (k, v) in gen.values() {
+                        gen_values.insert(k.to_string(), to_value(&v));
                     }
+                    generators.insert(
+                        path,
+                        proto::Generator {
+                            r#type: gen.name(),
+                            values: Some(prost_types::Struct { fields: gen_values }),
+                        },
+                    );
+                }
 
-         markdown.push_str(&format!("|{}|{}|\n", event_type, md.value));
-           }
+                markdown.push_str(&format!("|{}|{}|\n", event_type, md.value));
+            }
 
             debug!("matching rules = {:?}", rules);
             debug!("generators = {:?}", generators);
@@ -173,7 +193,7 @@ pub fn setup_sse_contents(
                     contents: Some(proto::Body {
                         content_type: "text/event-stream".to_string(),
                         content: Some(sse_output.into_bytes()),
-                        content_type_hint: 0
+                        content_type_hint: 0,
                     }),
                     rules,
                     generators,
@@ -181,12 +201,12 @@ pub fn setup_sse_contents(
                     plugin_configuration: None,
                     interaction_markup: markdown,
                     interaction_markup_type: 0,
-                    .. proto::InteractionResponse::default()
+                    ..proto::InteractionResponse::default()
                 }],
-                .. proto::ConfigureInteractionResponse::default()
+                ..proto::ConfigureInteractionResponse::default()
             }))
         }
-        None => Err(anyhow!("No config provided to match/generate SSE content"))
+        None => Err(anyhow!("No config provided to match/generate SSE content")),
     }
 }
 
@@ -207,7 +227,11 @@ pub fn compare_sse_contents(
         mismatches.push(proto::ContentMismatch {
             expected: Some(format!("{} events", expected_events.len()).into_bytes()),
             actual: Some(format!("{} events", actual_events.len()).into_bytes()),
-            mismatch: format!("Expected {} SSE events, but got {}", expected_events.len(), actual_events.len()),
+            mismatch: format!(
+                "Expected {} SSE events, but got {}",
+                expected_events.len(),
+                actual_events.len()
+            ),
             path: "".to_string(),
             diff: "".to_string(),
         });
@@ -222,7 +246,10 @@ pub fn compare_sse_contents(
                     mismatches.push(proto::ContentMismatch {
                         expected: Some(exp_type.as_bytes().to_vec()),
                         actual: Some(act_type.as_bytes().to_vec()),
-                        mismatch: format!("Expected event type '{}', but got '{}'", exp_type, act_type),
+                        mismatch: format!(
+                            "Expected event type '{}', but got '{}'",
+                            exp_type, act_type
+                        ),
                         path: format!("{}.event", event_prefix),
                         diff: "".to_string(),
                     });
@@ -328,7 +355,10 @@ pub fn compare_sse_contents(
                     mismatches.push(proto::ContentMismatch {
                         expected: Some(exp_retry.as_bytes().to_vec()),
                         actual: Some(act_retry.as_bytes().to_vec()),
-                        mismatch: format!("Expected retry '{}', but got '{}'", exp_retry, act_retry),
+                        mismatch: format!(
+                            "Expected retry '{}', but got '{}'",
+                            exp_retry, act_retry
+                        ),
                         path: format!("{}.retry", event_prefix),
                         diff: "".to_string(),
                     });
@@ -344,7 +374,7 @@ pub fn compare_sse_contents(
             String::default() => proto::ContentMismatches {
                 mismatches
             }
-        }
+        },
     }))
 }
 
@@ -356,9 +386,12 @@ pub fn generate_sse_content(
     let mut generators_map: HashMap<String, Generator> = HashMap::new();
     for (key, gen) in &request.generators {
         let field_key = crate::parser::parse_field(key)?;
-        let values_map: Map<String, Value> = gen.values.as_ref()
+        let values_map: Map<String, Value> = gen
+            .values
+            .as_ref()
             .ok_or_else(|| anyhow!("Generator values were expected"))?
-            .fields.iter()
+            .fields
+            .iter()
             .map(|(k, v)| (k.clone(), from_value(v)))
             .collect();
         let generator = Generator::from_map(&gen.r#type, &values_map)
@@ -425,5 +458,9 @@ pub fn generate_sse_content(
 
     debug!("Generated SSE contents has {} bytes", output.len());
     let bytes = Bytes::from(output.into_bytes());
-    Ok(OptionalBody::Present(bytes, Some(ContentType::from("text/event-stream")), None))
+    Ok(OptionalBody::Present(
+        bytes,
+        Some(ContentType::from("text/event-stream")),
+        None,
+    ))
 }
