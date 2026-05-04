@@ -1,5 +1,4 @@
 use actix_web::{web, App, HttpResponse, HttpServer};
-use fakeit::{datetime, internet};
 use log::*;
 use rand::Rng;
 use uuid::Uuid;
@@ -10,7 +9,7 @@ async fn get_events() -> HttpResponse {
     let mut rng = rand::thread_rng();
     let event_id: u64 = rng.gen_range(1..10000);
     let count_value: i32 = rng.gen_range(0..100);
-    let date = datetime::date_datetime();
+    let date = chrono::Utc::now();
     let user_id = Uuid::new_v4();
 
     let sse_data = format!(
