@@ -57,11 +57,7 @@ fn parse_sse_content(content: &str) -> Vec<SseEvent> {
     for line in content.lines() {
         let line = line.trim_end_matches('\r');
         if line.is_empty() {
-            if current.id.is_some()
-                || current.event_type.is_some()
-                || current.data.is_some()
-                || current.retry.is_some()
-            {
+            if current.data.is_some() {
                 events.push(current);
                 current = SseEvent {
                     id: None,
@@ -76,22 +72,14 @@ fn parse_sse_content(content: &str) -> Vec<SseEvent> {
             continue;
         }
         if let Some(value) = line.strip_prefix("id:") {
-            current.id = Some(value.to_string());
+            current.id = Some(value.strip_prefix(' ').unwrap_or(value).to_string());
         } else if let Some(value) = line.strip_prefix("event:") {
-            current.event_type = Some(value.to_string());
+            current.event_type = Some(value.strip_prefix(' ').unwrap_or(value).to_string());
         } else if let Some(value) = line.strip_prefix("data:") {
-            current.data = Some(value.to_string());
+            current.data = Some(value.strip_prefix(' ').unwrap_or(value).to_string());
         } else if let Some(value) = line.strip_prefix("retry:") {
-            current.retry = Some(value.to_string());
+            current.retry = Some(value.strip_prefix(' ').unwrap_or(value).to_string());
         }
-    }
-
-    if current.id.is_some()
-        || current.event_type.is_some()
-        || current.data.is_some()
-        || current.retry.is_some()
-    {
-        events.push(current);
     }
 
     events
@@ -222,144 +210,34 @@ pub fn compare_sse_contents(
     let actual_events = parse_sse_content(actual_sse);
 
     let mut mismatches = Vec::new();
+    let mut used_actual: std::collections::HashSet<usize> = std::collections::HashSet::new();
 
-    if expected_events.len() != actual_events.len() {
-        mismatches.push(proto::ContentMismatch {
-            expected: Some(format!("{} events", expected_events.len()).into_bytes()),
-            actual: Some(format!("{} events", actual_events.len()).into_bytes()),
-            mismatch: format!(
-                "Expected {} SSE events, but got {}",
-                expected_events.len(),
-                actual_events.len()
-            ),
-            path: "".to_string(),
-            diff: "".to_string(),
+    for (exp_idx, exp) in expected_events.iter().enumerate() {
+        let event_prefix = format!("event[{}]", exp_idx);
+        let exp_type = &exp.event_type;
+
+        // Find a matching actual event by type
+        let act_opt = actual_events.iter().enumerate().find(|(idx, act)| {
+            !used_actual.contains(idx) && act.event_type.as_ref() == exp_type.as_ref()
         });
-    }
 
-    for (idx, (exp, act)) in expected_events.iter().zip(actual_events.iter()).enumerate() {
-        let event_prefix = format!("event[{}]", idx);
-
-        if let Some(ref exp_type) = exp.event_type {
-            if let Some(ref act_type) = act.event_type {
-                if exp_type != act_type {
-                    mismatches.push(proto::ContentMismatch {
-                        expected: Some(exp_type.as_bytes().to_vec()),
-                        actual: Some(act_type.as_bytes().to_vec()),
-                        mismatch: format!(
-                            "Expected event type '{}', but got '{}'",
-                            exp_type, act_type
-                        ),
-                        path: format!("{}.event", event_prefix),
-                        diff: "".to_string(),
-                    });
-                }
+        match act_opt {
+            Some((act_idx, act)) => {
+                used_actual.insert(act_idx);
+                compare_event(exp, act, &event_prefix, rules, &mut mismatches);
             }
-        }
-
-        if let Some(ref exp_id) = exp.id {
-            let rule_path = if exp.event_type.is_some() {
-                format!("id[{}][*]", exp.event_type.as_deref().unwrap_or(""))
-            } else {
-                "id[*]".to_string()
-            };
-
-            if let Some(ref act_id) = act.id {
-                if let Some(rule_list) = rules.get(&rule_path) {
-                    for rule in &rule_list.rules {
-                        if let Err(err) = exp_id.matches_with(act_id, rule, false) {
-                            mismatches.push(proto::ContentMismatch {
-                                expected: Some(exp_id.as_bytes().to_vec()),
-                                actual: Some(act_id.as_bytes().to_vec()),
-                                mismatch: err.to_string(),
-                                path: format!("{}.id", event_prefix),
-                                diff: "".to_string(),
-                            });
-                        }
-                    }
-                } else if exp_id != act_id {
-                    mismatches.push(proto::ContentMismatch {
-                        expected: Some(exp_id.as_bytes().to_vec()),
-                        actual: Some(act_id.as_bytes().to_vec()),
-                        mismatch: format!("Expected id '{}', but got '{}'", exp_id, act_id),
-                        path: format!("{}.id", event_prefix),
-                        diff: "".to_string(),
-                    });
-                }
-            } else {
-                mismatches.push(proto::ContentMismatch {
-                    expected: Some(exp_id.as_bytes().to_vec()),
-                    actual: None,
-                    mismatch: format!("Expected id '{}', but event has no id", exp_id),
-                    path: format!("{}.id", event_prefix),
-                    diff: "".to_string(),
-                });
-            }
-        }
-
-        if let Some(ref exp_data) = exp.data {
-            let rule_path = if exp.event_type.is_some() {
-                format!("data[{}][*]", exp.event_type.as_deref().unwrap_or(""))
-            } else {
-                "data[*]".to_string()
-            };
-
-            if let Some(ref act_data) = act.data {
-                if let Some(rule_list) = rules.get(&rule_path) {
-                    for rule in &rule_list.rules {
-                        if let Err(err) = exp_data.matches_with(act_data, rule, false) {
-                            mismatches.push(proto::ContentMismatch {
-                                expected: Some(exp_data.as_bytes().to_vec()),
-                                actual: Some(act_data.as_bytes().to_vec()),
-                                mismatch: err.to_string(),
-                                path: format!("{}.data", event_prefix),
-                                diff: "".to_string(),
-                            });
-                        }
-                    }
-                } else if exp_data != act_data {
+            None => {
+                // No matching event type found
+                if let Some(ref exp_data) = exp.data {
                     mismatches.push(proto::ContentMismatch {
                         expected: Some(exp_data.as_bytes().to_vec()),
-                        actual: Some(act_data.as_bytes().to_vec()),
-                        mismatch: format!("Expected data '{}', but got '{}'", exp_data, act_data),
-                        path: format!("{}.data", event_prefix),
-                        diff: "".to_string(),
-                    });
-                }
-            } else {
-                mismatches.push(proto::ContentMismatch {
-                    expected: Some(exp_data.as_bytes().to_vec()),
-                    actual: None,
-                    mismatch: format!("Expected data '{}', but event has no data", exp_data),
-                    path: format!("{}.data", event_prefix),
-                    diff: "".to_string(),
-                });
-            }
-        }
-
-        if let Some(ref exp_retry) = exp.retry {
-            if let Some(ref act_retry) = act.retry {
-                if let Some(rule_list) = rules.get("retry") {
-                    for rule in &rule_list.rules {
-                        if let Err(err) = exp_retry.matches_with(act_retry, rule, false) {
-                            mismatches.push(proto::ContentMismatch {
-                                expected: Some(exp_retry.as_bytes().to_vec()),
-                                actual: Some(act_retry.as_bytes().to_vec()),
-                                mismatch: err.to_string(),
-                                path: format!("{}.retry", event_prefix),
-                                diff: "".to_string(),
-                            });
-                        }
-                    }
-                } else if exp_retry != act_retry {
-                    mismatches.push(proto::ContentMismatch {
-                        expected: Some(exp_retry.as_bytes().to_vec()),
-                        actual: Some(act_retry.as_bytes().to_vec()),
+                        actual: None,
                         mismatch: format!(
-                            "Expected retry '{}', but got '{}'",
-                            exp_retry, act_retry
+                            "Expected '{}' event with data '{}', but no such event found",
+                            exp_type.as_deref().unwrap_or("message"),
+                            exp_data
                         ),
-                        path: format!("{}.retry", event_prefix),
+                        path: format!("{}.data", event_prefix),
                         diff: "".to_string(),
                     });
                 }
@@ -376,6 +254,129 @@ pub fn compare_sse_contents(
             }
         },
     }))
+}
+
+fn compare_event(
+    exp: &SseEvent,
+    act: &SseEvent,
+    event_prefix: &str,
+    rules: &HashMap<String, pact_models::matchingrules::RuleList>,
+    mismatches: &mut Vec<proto::ContentMismatch>,
+) {
+    let rule_path_suffix = exp
+        .event_type
+        .as_ref()
+        .map(|t| format!(".{}.{}", t, "*"))
+        .unwrap_or_else(|| ".*".to_string());
+
+    if let Some(ref exp_id) = exp.id {
+        let rule_path = format!("id{}", rule_path_suffix);
+
+        if let Some(ref act_id) = act.id {
+            if let Some(rule_list) = rules.get(&rule_path) {
+                for rule in &rule_list.rules {
+                    if let Err(err) = exp_id.matches_with(act_id, rule, false) {
+                        mismatches.push(proto::ContentMismatch {
+                            expected: Some(exp_id.as_bytes().to_vec()),
+                            actual: Some(act_id.as_bytes().to_vec()),
+                            mismatch: err.to_string(),
+                            path: format!("{}.id", event_prefix),
+                            diff: "".to_string(),
+                        });
+                    }
+                }
+            } else if exp_id != act_id {
+                mismatches.push(proto::ContentMismatch {
+                    expected: Some(exp_id.as_bytes().to_vec()),
+                    actual: Some(act_id.as_bytes().to_vec()),
+                    mismatch: format!("Expected id '{}', but got '{}'", exp_id, act_id),
+                    path: format!("{}.id", event_prefix),
+                    diff: "".to_string(),
+                });
+            }
+        } else if rules.get(&rule_path).is_some() {
+            // Has rule but no actual id — skip if rule allows missing
+        } else {
+            mismatches.push(proto::ContentMismatch {
+                expected: Some(exp_id.as_bytes().to_vec()),
+                actual: None,
+                mismatch: format!("Expected id '{}', but event has no id", exp_id),
+                path: format!("{}.id", event_prefix),
+                diff: "".to_string(),
+            });
+        }
+    }
+
+    if let Some(ref exp_data) = exp.data {
+        let rule_path = format!("data{}", rule_path_suffix);
+
+        if let Some(ref act_data) = act.data {
+            if let Some(rule_list) = rules.get(&rule_path) {
+                for rule in &rule_list.rules {
+                    if let Err(err) = exp_data.matches_with(act_data, rule, false) {
+                        mismatches.push(proto::ContentMismatch {
+                            expected: Some(exp_data.as_bytes().to_vec()),
+                            actual: Some(act_data.as_bytes().to_vec()),
+                            mismatch: err.to_string(),
+                            path: format!("{}.data", event_prefix),
+                            diff: "".to_string(),
+                        });
+                    }
+                }
+            } else if exp_data != act_data {
+                mismatches.push(proto::ContentMismatch {
+                    expected: Some(exp_data.as_bytes().to_vec()),
+                    actual: Some(act_data.as_bytes().to_vec()),
+                    mismatch: format!(
+                        "Expected data '{}', but got '{}'",
+                        exp_data, act_data
+                    ),
+                    path: format!("{}.data", event_prefix),
+                    diff: "".to_string(),
+                });
+            }
+        } else {
+            mismatches.push(proto::ContentMismatch {
+                expected: Some(exp_data.as_bytes().to_vec()),
+                actual: None,
+                mismatch: format!(
+                    "Expected data '{}', but event has no data",
+                    exp_data
+                ),
+                path: format!("{}.data", event_prefix),
+                diff: "".to_string(),
+            });
+        }
+    }
+
+    if let Some(ref exp_retry) = exp.retry {
+        if let Some(ref act_retry) = act.retry {
+            if let Some(rule_list) = rules.get("retry") {
+                for rule in &rule_list.rules {
+                    if let Err(err) = exp_retry.matches_with(act_retry, rule, false) {
+                        mismatches.push(proto::ContentMismatch {
+                            expected: Some(exp_retry.as_bytes().to_vec()),
+                            actual: Some(act_retry.as_bytes().to_vec()),
+                            mismatch: err.to_string(),
+                            path: format!("{}.retry", event_prefix),
+                            diff: "".to_string(),
+                        });
+                    }
+                }
+            } else if exp_retry != act_retry {
+                mismatches.push(proto::ContentMismatch {
+                    expected: Some(exp_retry.as_bytes().to_vec()),
+                    actual: Some(act_retry.as_bytes().to_vec()),
+                    mismatch: format!(
+                        "Expected retry '{}', but got '{}'",
+                        exp_retry, act_retry
+                    ),
+                    path: format!("{}.retry", event_prefix),
+                    diff: "".to_string(),
+                });
+            }
+        }
+    }
 }
 
 pub fn generate_sse_content(

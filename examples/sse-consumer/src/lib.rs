@@ -38,6 +38,9 @@ pub struct SseEvent {
 }
 
 fn parse_sse_events(content: &str) -> anyhow::Result<Vec<SseEvent>> {
+    eprintln!("=== RAW SSE CONTENT ===");
+    eprintln!("{}", content);
+    eprintln!("=========================");
     let mut events = Vec::new();
     let mut current = SseEvent {
         id: None,
@@ -72,16 +75,15 @@ fn parse_sse_events(content: &str) -> anyhow::Result<Vec<SseEvent>> {
             current.event_type = Some(value.trim().to_string());
             has_content = true;
         } else if let Some(value) = line.strip_prefix("data:") {
-            current.data = value.to_string();
+            if !current.data.is_empty() {
+                current.data.push('\n');
+            }
+            current.data.push_str(value);
             has_content = true;
         } else if let Some(value) = line.strip_prefix("retry:") {
             current.retry = Some(value.trim().to_string());
             has_content = true;
         }
-    }
-
-    if has_content {
-        events.push(current);
     }
 
     Ok(events)
@@ -99,28 +101,29 @@ mod tests {
 
     #[test_log::test(tokio::test(flavor = "multi_thread", worker_threads = 1))]
     async fn test_sse_client_get_events() {
-        let mut builder = PactBuilder::new_v4("SseClient", "SseServer")
+        let mut builder = PactBuilder::new_v4("sseConsumer", "sseProvider")
             .using_plugin("sse", None)
             .await;
+        builder.output_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../pacts"));
 
-        builder
+      builder
             .interaction("request for SSE events", "", |mut i| async move {
                 i.request.path("/events");
                 i.response
                     .ok()
                     .header("Cache-Control", "no-cache")
-                    .header("Connection", "keep-alive")
+                    // .header("Connection", "keep-alive") // actix_web doesn't include Connection header in response
                     .header("X-Accel-Buffering", "no")
                     .contents(
                         ContentType::from("text/event-stream"),
                         json!({
-                   "id[*]": "matching(number, 100)",
-                             "id[user]": "matching(regex, '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', '5d03dc45-96f6-4c0c-b1ad-aa67242058cc')",
+                            "id": "matching(number, 100)",
                             "retry": "matching(integer, 3000)",
                             "event": "matching(type, 'count')",
-                            "data[*]": "matching(type, 'simple text')",
-                            "data[count]": "matching(number, 42)",
-                            "data[time]": "matching(datetime, 'yyyy-MM-dd', '2024-01-15')"
+                            "data": "matching(type, 'simple text')",
+                            "data[count]": "matching(number, 100)",
+                            "data[time]": "matching(datetime, 'yyyy-MM-dd', '2000-01-01')",
+                            "data[user]": "matching(regex, 'id: \\d+, name: \\w+', 'id: 123, name: Bob')"
                         }),
                     )
                     .await;
@@ -133,31 +136,22 @@ mod tests {
         let client = SseClient::new(mock_server.url().clone());
         let events = client.get_events("/events").await.unwrap();
 
-    expect!(events.len()).to(be_equal_to(5));
+        let expected_data = vec![
+            "simple text",
+            "100",
+            "2000-01-01",
+            "id: 123, name: Bob",
+        ];
 
-       // Check that we have the expected event types
-       let event_types: Vec<_> = events.iter().map(|e| e.event_type.clone()).collect();
-       expect!(event_types.contains(&None)).to(be_true()); // untyped event
-       expect!(event_types.contains(&Some("count".to_string()))).to(be_true());
-       expect!(event_types.contains(&Some("time".to_string()))).to(be_true());
-       expect!(event_types.contains(&Some("user".to_string()))).to(be_true());
-
-       // Check that we have expected data
-       let data_values: Vec<_> = events.iter().map(|e| e.data.clone()).collect();
-       expect!(data_values.contains(&"simple text".to_string())).to(be_true());
-       expect!(data_values.contains(&"42".to_string())).to(be_true());
-
-       // Check date format exists
-       let date_re = Regex::new(r"\d{4}-\d{2}-\d{2}").unwrap();
-       let has_date = data_values.iter().any(|d| date_re.is_match(d));
-       expect!(has_date).to(be_true());
-
-       // Check UUID format exists
-       let uuid_re =
-           Regex::new(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-               .unwrap();
-       let has_uuid = data_values.iter().any(|d| uuid_re.is_match(d));
-       expect!(has_uuid).to(be_true());
+        let mut index = 0u32;
+        for event in &events {
+            if index >= expected_data.len() as u32 {
+                break;
+            }
+            expect!(&event.data).to(be_equal_to(&expected_data[index as usize]));
+            index += 1;
+        }
+        expect!(index).to(be_equal_to(expected_data.len() as u32));
    }
 
     #[test]

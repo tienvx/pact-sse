@@ -39,3 +39,11 @@ The provider is a binary server that can be run directly:
 cd examples/sse-provider
 cargo run
 ```
+
+## Test execution order
+
+1. Run consumer test first
+2. Get generated pact JSON file
+3. Run provider test
+
+The pact JSON file should not be updated manually.

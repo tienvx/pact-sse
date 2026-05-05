@@ -47,13 +47,13 @@ async fn verify_sse_provider() {
         ..ProviderInfo::default()
     };
 
-    let source = PactSource::File("pacts/sseConsumer-sseProvider.json".to_string());
+    let source = PactSource::File("../pacts/sseConsumer-sseProvider.json".to_string());
 
     let options: VerificationOptions<NullRequestFilterExecutor> = VerificationOptions::default();
     let ps_executor = NoopProviderStateExecutor {};
 
     // Start the provider server in the background
-    let server_handle = std::thread::spawn(|| {
+    let _server_handle = std::thread::spawn(|| {
         actix_web::rt::System::new().block_on(async {
             let _ = simple_log::quick();
 
@@ -61,19 +61,27 @@ async fn verify_sse_provider() {
                 actix_web::App::new().route(
                     "/events",
                     actix_web::web::get().to(|| async {
-                        let count_value = 100i32;
-                        let date = "2000-01-01";
-                        let user_id = "5d03dc45-96f6-4c0c-b1ad-aa67242058cc";
+                        let sse_data = "id:901
+retry:20
 
-                        let sse_data = format!(
-                            "data:simple text\n\nevent:count\ndata:{}\n\nevent:time\ndata:{}\n\nevent:user\ndata:user data payload\n\ndata:100\n\nevent:user\ndata:{}\n\n",
-                            count_value, date, user_id
-                        );
+data: I read this book many times
+
+event:count
+data:34
+
+data: Last time I read it
+
+event:time
+data:2015-02-21
+
+event:user
+data: id: 12, name: John
+
+".to_string();
 
                         actix_web::HttpResponse::Ok()
                             .content_type("text/event-stream")
                             .append_header(("Cache-Control", "no-cache"))
-                            .append_header(("Connection", "keep-alive"))
                             .append_header(("X-Accel-Buffering", "no"))
                             .body(sse_data)
                     }),
@@ -106,5 +114,5 @@ async fn verify_sse_provider() {
     let verification_result = result.expect("Verification failed");
     expect!(verification_result.result).to(be_true());
 
-    let _ = server_handle.join();
+    // Server thread is detached; it will be cleaned up when the process exits
 }

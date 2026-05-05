@@ -1,50 +1,32 @@
 use actix_web::{web, App, HttpResponse, HttpServer};
 use log::*;
-use rand::Rng;
-use uuid::Uuid;
 
 async fn get_events() -> HttpResponse {
     debug!("GET request for SSE events");
 
-    let mut rng = rand::thread_rng();
-    let event_id: u64 = rng.gen_range(1..10000);
-    let count_value: i32 = rng.gen_range(0..100);
-    let date = chrono::Utc::now();
-    let user_id = Uuid::new_v4();
+    let sse_data = "id:901
+retry:20
 
-    let sse_data = format!(
-        "id:{}\ndata:simple text\n\
-         retry:3000\nevent:count\ndata:{}\n\
-         event:time\ndata:{}\n\
-         id:{}\nevent:user\ndata:{}\n",
-        event_id, count_value, date.format("%Y-%m-%d"), event_id + 1000, user_id
-    );
+data: I read this book many times
 
-    HttpResponse::Ok()
-        .content_type("text/event-stream")
-        .header("Cache-Control", "no-cache")
-        .header("Connection", "keep-alive")
-        .header("X-Accel-Buffering", "no")
-        .body(sse_data)
-}
+event:count
+data:34
 
-async fn get_events_with_headers() -> HttpResponse {
-    debug!("GET request for SSE events with custom headers");
+data: Last time I read it
 
-    let mut rng = rand::thread_rng();
-    let last_event_id: u64 = rng.gen_range(1..1000);
+event:time
+data:2015-02-21
 
-    let sse_data = format!(
-        "id:{}\nevent:heartbeat\ndata:{{\"status\":\"ok\"}}\n\
-         id:{}\ndata:plain message\n",
-        last_event_id,
-        last_event_id + 1
-    );
+event:user
+data: id: 12, name: John
+
+".to_string();
 
     HttpResponse::Ok()
         .content_type("text/event-stream")
-        .header("Cache-Control", "no-cache")
-        .header("Connection", "keep-alive")
+        .append_header(("Cache-Control", "no-cache"))
+        .append_header(("Connection", "keep-alive"))
+        .append_header(("X-Accel-Buffering", "no"))
         .body(sse_data)
 }
 
@@ -57,8 +39,8 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .route("/events", web::get().to(get_events))
             .route(
-                "/events/with-headers",
-                web::get().to(get_events_with_headers),
+                "/pact-change-state",
+                web::post().to(|| async { HttpResponse::Ok().finish() }),
             )
     })
     .bind("127.0.0.1:8080")?
