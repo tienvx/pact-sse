@@ -24,7 +24,7 @@ cargo run --release
 cargo test
 ```
 
-### Consumer example
+### Consumer test
 
 Note: Tests may encounter runtime issues due to tokio constraints with plugins.
 ```bash
@@ -32,12 +32,10 @@ cd examples/sse-consumer
 PACT_DO_NOT_TRACK=true cargo test
 ```
 
-### Provider example
-
-The provider is a binary server that can be run directly:
+### Provider verification test
 ```bash
 cd examples/sse-provider
-cargo run
+PACT_DO_NOT_TRACK=true cargo test
 ```
 
 ## Test execution order
@@ -46,9 +44,3 @@ cargo run
 2. Run provider test
 
 The pact JSON file (`examples/pacts/sseConsumer-sseProvider.json`) is generated automatically by the consumer tests and should not be edited manually.
-
-### Provider verification test
-```bash
-cd examples/sse-provider
-PACT_DO_NOT_TRACK=true cargo test
-```
