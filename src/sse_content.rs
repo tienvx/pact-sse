@@ -76,7 +76,13 @@ fn parse_sse_content(content: &str) -> Vec<SseEvent> {
         } else if let Some(value) = line.strip_prefix("event:") {
             current.event_type = Some(value.strip_prefix(' ').unwrap_or(value).to_string());
         } else if let Some(value) = line.strip_prefix("data:") {
-            current.data = Some(value.strip_prefix(' ').unwrap_or(value).to_string());
+            let value = value.strip_prefix(' ').unwrap_or(value);
+            current.data = Some(
+                current
+                    .data
+                    .map(|existing| format!("{}\n{}", existing, value))
+                    .unwrap_or_else(|| value.to_string()),
+            );
         } else if let Some(value) = line.strip_prefix("retry:") {
             current.retry = Some(value.strip_prefix(' ').unwrap_or(value).to_string());
         }
@@ -117,7 +123,12 @@ pub fn setup_sse_contents(
                 if !event_type.is_empty() {
                     sse_output.push_str(&format!("event:{}\n", event_type));
                 }
-                sse_output.push_str(&format!("data:{}\n", md.value));
+                for line in md.value.lines() {
+                    sse_output.push_str(&format!("data:{}\n", line));
+                }
+                if md.value.ends_with('\n') {
+                    sse_output.push_str("data:\n");
+                }
                 sse_output.push('\n');
 
                 let path = field_key.path();
@@ -431,11 +442,17 @@ pub fn generate_sse_content(
                 "data[*]".to_string()
             };
 
-            if let Some(gen) = generators_map.get(&gen_key) {
-                let val: String = gen.generate_value(data, &context, &variant_matcher)?;
-                output.push_str(&format!("data:{}\n", val));
+            let val = if let Some(gen) = generators_map.get(&gen_key) {
+                gen.generate_value(data, &context, &variant_matcher)?
             } else {
-                output.push_str(&format!("data:{}\n", data));
+                data.clone()
+            };
+
+            for line in val.lines() {
+                output.push_str(&format!("data:{}\n", line));
+            }
+            if val.ends_with('\n') {
+                output.push_str("data:\n");
             }
         }
 
@@ -464,4 +481,37 @@ pub fn generate_sse_content(
         Some(ContentType::from("text/event-stream")),
         None,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_multiline_data() {
+        let sse = "event:message\ndata:line one\ndata:line two\ndata:line three\n\n";
+        let events = parse_sse_content(sse);
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].data.as_ref().unwrap(),
+            "line one\nline two\nline three"
+        );
+    }
+
+    #[test]
+    fn test_parse_single_line_data() {
+        let sse = "event:count\ndata:42\n\n";
+        let events = parse_sse_content(sse);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].data.as_ref().unwrap(), "42");
+    }
+
+    #[test]
+    fn test_parse_event_without_trailing_blank_line() {
+        let sse = "event:count\ndata:42";
+        let events = parse_sse_content(sse);
+        // Currently the last event without trailing blank line is lost
+        // This test documents current behavior; fix in bug #3
+        assert_eq!(events.len(), 0);
+    }
 }

@@ -6,7 +6,7 @@
     {
       "description": "request for SSE events",
       "interactionMarkup": {
-        "markup": "# SSE Events\n\n|type|data|\n|---|---|\n||simple text|\n|count|100|\n|time|2000-01-01|\n|user|id: 123, name: Bob|\n||100|\n",
+        "markup": "# SSE Events\n\n|type|data|\n|---|---|\n||simple text\nother text|\n|count|100|\n|time|2000-01-01|\n|user|id: 123, name: Bob|\n||100|\n",
         "markupType": "COMMON_MARK"
       },
       "pending": false,
@@ -16,7 +16,7 @@
       },
       "response": {
         "body": {
-          "content": "data:simple text\n\nevent:count\ndata:100\n\nevent:time\ndata:2000-01-01\n\nevent:user\ndata:id: 123, name: Bob\n\ndata:100\n\n",
+          "content": "data:simple text\ndata:other text\n\nevent:count\ndata:100\n\nevent:time\ndata:2000-01-01\n\nevent:user\ndata:id: 123, name: Bob\n\ndata:100\n\n",
           "contentType": "text/event-stream",
           "contentTypeHint": "DEFAULT",
           "encoded": false

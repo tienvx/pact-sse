@@ -120,7 +120,7 @@ mod tests {
                             "id": "matching(number, 100)",
                             "retry": "matching(integer, 3000)",
                             "event": "matching(type, 'count')",
-                            "data": "matching(type, 'simple text')",
+                            "data": "matching(type, 'simple text\nother text')",
                             "data[count]": "matching(number, 100)",
                             "data[time]": "matching(datetime, 'yyyy-MM-dd', '2000-01-01')",
                             "data[user]": "matching(regex, 'id: \\d+, name: \\w+', 'id: 123, name: Bob')"
@@ -137,7 +137,7 @@ mod tests {
         let events = client.get_events("/events").await.unwrap();
 
         let expected_data = vec![
-            "simple text",
+            "simple text\nother text",
             "100",
             "2000-01-01",
             "id: 123, name: Bob",
