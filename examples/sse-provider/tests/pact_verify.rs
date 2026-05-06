@@ -64,7 +64,17 @@ async fn verify_sse_provider() {
                         let sse_data = "id:901
 retry:20
 
-data: I read this book many times
+data: I am
+
+event:user
+data: id: 12, name: John
+
+data: I have many books
+
+event:count
+data:12
+
+data: I love this book. I read it many times
 
 event:count
 data:34
@@ -73,9 +83,6 @@ data: Last time I read it
 
 event:time
 data:2015-02-21
-
-event:user
-data: id: 12, name: John
 
 ".to_string();
 

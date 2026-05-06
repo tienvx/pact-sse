@@ -42,8 +42,13 @@ cargo run
 
 ## Test execution order
 
-1. Run consumer test first
-2. Get generated pact JSON file
-3. Run provider test
+1. Run consumer test first (generates pact file to `examples/pacts/sseConsumer-sseProvider.json`)
+2. Run provider test
 
-The pact JSON file should not be updated manually.
+The pact JSON file (`examples/pacts/sseConsumer-sseProvider.json`) is generated automatically by the consumer tests and should not be edited manually.
+
+### Provider verification test
+```bash
+cd examples/sse-provider
+PACT_DO_NOT_TRACK=true cargo test
+```
