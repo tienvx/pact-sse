@@ -105,6 +105,7 @@ mod tests {
             .using_plugin("sse", None)
             .await;
         builder.output_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../pacts"));
+        std::env::set_var("PACT_OVERWRITE", "true");
 
       builder
             .interaction("request for SSE events", "", |mut i| async move {
