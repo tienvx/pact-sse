@@ -40,7 +40,10 @@ PACT_DO_NOT_TRACK=true cargo test
 
 ## Test execution order
 
-1. Run consumer test first (generates pact file to `examples/pacts/sseConsumer-sseProvider.json`)
-2. Run provider test
+1. Build and install the plugin first
+2. Run consumer test (generates pact file to `examples/pacts/sseConsumer-sseProvider.json`)
+3. Run provider test
 
 The pact JSON file (`examples/pacts/sseConsumer-sseProvider.json`) is generated automatically by the consumer tests and should not be edited manually.
+
+**Important:** The consumer and provider examples use the installed plugin binary at `~/.pact/plugins/sse-0.1.0/`. Always rebuild and reinstall after code changes before running the examples.
