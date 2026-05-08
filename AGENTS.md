@@ -51,4 +51,4 @@ The pact JSON file (`examples/pacts/sseConsumer-sseProvider.json`) is generated 
 ## SSE Plugin Notes
 
 - **Matching rules:** SSE data values are strings, so never rely on `type` matcher alone -- it only checks if both values are the same type (string), meaning `'aa'` would match `'100'`. Always use stricter matchers like `integer`, `number`, `regex`, etc.
-- **`id` and `retry`:** These are global SSE fields applied to all events, not per-event data. On consumer side, they're placed in the first event. On provider side, all events should have the same `id`/`retry` and matching rules (number, integer) must be enforced.
+- **`id` and `retry`:** These are global SSE fields applied to all events, not per-event data. On consumer side, they're placed in the first event, all events should have the same `id`/`retry`. On provider side, matching rules (number, integer) must be enforced.
