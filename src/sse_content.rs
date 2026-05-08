@@ -102,13 +102,19 @@ pub fn setup_sse_contents(
                     FieldKey,
                 )>,
             > = Vec::new();
+            let mut event_md: Option<pact_models::matchingrules::expressions::MatchingRuleDefinition> = None;
+            let mut retry_md: Option<pact_models::matchingrules::expressions::MatchingRuleDefinition> = None;
 
             for (key, value) in &config.fields {
                 let field_key = parse_field(key)?;
                 let result = parse_value(value)?;
                 debug!("Parsed SSE field: {:?} -> {:?}", field_key, result);
 
-                if key != "event" && key != "retry" {
+                if key == "event" {
+                    event_md = Some(result);
+                } else if key == "retry" {
+                    retry_md = Some(result);
+                } else {
                     events.push(Some((result, field_key)));
                 }
             }
@@ -117,6 +123,115 @@ pub fn setup_sse_contents(
             let mut rules = hashmap! {};
             let mut generators = hashmap! {};
             let mut markdown = String::from("# SSE Events\n\n|type|data|\n|---|---|\n");
+
+            // Generate matching rule for 'event' field
+            if let Some(ref md) = event_md {
+                let rule_type = md
+                    .rules
+                    .first()
+                    .and_then(|r| {
+                        if let Either::Left(r) = r {
+                            Some(r.name())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| "type".to_string());
+
+                let mut rule_values: BTreeMap<String, prost_types::Value> = BTreeMap::new();
+                if let Some(Either::Left(r)) = md.rules.first() {
+                    for (k, v) in r.values() {
+                        rule_values.insert(k.to_string(), to_value(&v));
+                    }
+                }
+                rule_values.insert(
+                    "match".to_string(),
+                    to_value(&Value::String(rule_type.clone())),
+                );
+
+                rules.insert(
+                    "event".to_string(),
+                    proto::MatchingRules {
+                        rule: vec![proto::MatchingRule {
+                            r#type: rule_type,
+                            values: Some(prost_types::Struct {
+                                fields: rule_values,
+                            }),
+                        }],
+                    },
+                );
+
+                if let Some(ref gen) = md.generator {
+                    let mut gen_values: BTreeMap<String, prost_types::Value> = BTreeMap::new();
+                    for (k, v) in gen.values() {
+                        gen_values.insert(k.to_string(), to_value(&v));
+                    }
+                    generators.insert(
+                        "event".to_string(),
+                        proto::Generator {
+                            r#type: gen.name(),
+                            values: Some(prost_types::Struct { fields: gen_values }),
+                        },
+                    );
+                }
+            }
+
+            // Generate matching rule for 'retry' field
+            if let Some(ref md) = retry_md {
+                let rule_type = md
+                    .rules
+                    .first()
+                    .and_then(|r| {
+                        if let Either::Left(r) = r {
+                            Some(r.name())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| "integer".to_string());
+
+                let mut rule_values: BTreeMap<String, prost_types::Value> = BTreeMap::new();
+                if let Some(Either::Left(r)) = md.rules.first() {
+                    for (k, v) in r.values() {
+                        rule_values.insert(k.to_string(), to_value(&v));
+                    }
+                }
+                rule_values.insert(
+                    "match".to_string(),
+                    to_value(&Value::String(rule_type.clone())),
+                );
+
+                rules.insert(
+                    "retry".to_string(),
+                    proto::MatchingRules {
+                        rule: vec![proto::MatchingRule {
+                            r#type: rule_type,
+                            values: Some(prost_types::Struct {
+                                fields: rule_values,
+                            }),
+                        }],
+                    },
+                );
+
+                if let Some(ref gen) = md.generator {
+                    let mut gen_values: BTreeMap<String, prost_types::Value> = BTreeMap::new();
+                    for (k, v) in gen.values() {
+                        gen_values.insert(k.to_string(), to_value(&v));
+                    }
+                    generators.insert(
+                        "retry".to_string(),
+                        proto::Generator {
+                            r#type: gen.name(),
+                            values: Some(prost_types::Struct { fields: gen_values }),
+                        },
+                    );
+                }
+            }
+
+            // Add retry to output if present
+            if let Some(ref md) = retry_md {
+                sse_output.push_str(&format!("retry:{}\n", md.value));
+            }
 
             for (md, field_key) in events.iter().flatten() {
                 let event_type = field_key.event_type.clone().unwrap_or_default();
@@ -279,6 +394,49 @@ fn compare_event(
         .as_ref()
         .map(|t| format!(".{}.{}", t, "*"))
         .unwrap_or_else(|| ".*".to_string());
+
+    // Compare event types using the 'event' matching rule
+    if let Some(ref exp_event_type) = exp.event_type {
+        if let Some(ref act_event_type) = act.event_type {
+            if let Some(rule_list) = rules.get("event") {
+                for rule in &rule_list.rules {
+                    if let Err(err) = exp_event_type.matches_with(act_event_type, rule, false) {
+                        mismatches.push(proto::ContentMismatch {
+                            expected: Some(exp_event_type.as_bytes().to_vec()),
+                            actual: Some(act_event_type.as_bytes().to_vec()),
+                            mismatch: err.to_string(),
+                            path: format!("{}.event", event_prefix),
+                            diff: "".to_string(),
+                        });
+                    }
+                }
+            } else if exp_event_type != act_event_type {
+                mismatches.push(proto::ContentMismatch {
+                    expected: Some(exp_event_type.as_bytes().to_vec()),
+                    actual: Some(act_event_type.as_bytes().to_vec()),
+                    mismatch: format!(
+                        "Expected event type '{}', but got '{}'",
+                        exp_event_type, act_event_type
+                    ),
+                    path: format!("{}.event", event_prefix),
+                    diff: "".to_string(),
+                });
+            }
+        } else if rules.get("event").is_some() {
+            // Has rule but no actual event type
+        } else {
+            mismatches.push(proto::ContentMismatch {
+                expected: Some(exp_event_type.as_bytes().to_vec()),
+                actual: None,
+                mismatch: format!(
+                    "Expected event type '{}', but event has no event type",
+                    exp_event_type
+                ),
+                path: format!("{}.event", event_prefix),
+                diff: "".to_string(),
+            });
+        }
+    }
 
     if let Some(ref exp_id) = exp.id {
         let rule_path = format!("id{}", rule_path_suffix);
