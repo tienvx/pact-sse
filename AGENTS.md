@@ -1,5 +1,7 @@
 # Build and Test Commands
 
+The plugin version is defined in `Cargo.toml`. Read it from there before using it in commands below.
+
 ## Build the plugin
 ```bash
 cargo build --release
@@ -7,9 +9,10 @@ cargo build --release
 
 ## Install the plugin
 ```bash
-mkdir -p ~/.pact/plugins/sse-0.1.0
-cp target/release/pact-sse-plugin ~/.pact/plugins/sse-0.1.0/
-cp pact-plugin.json ~/.pact/plugins/sse-0.1.0/
+VERSION=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
+mkdir -p ~/.pact/plugins/sse-$VERSION
+cp target/release/pact-sse-plugin ~/.pact/plugins/sse-$VERSION/
+cp pact-plugin.json ~/.pact/plugins/sse-$VERSION/
 ```
 
 ## Run the plugin
@@ -46,7 +49,7 @@ PACT_DO_NOT_TRACK=true cargo test
 
 The pact JSON file (`examples/pacts/sseConsumer-sseProvider.json`) is generated automatically by the consumer tests and should not be edited manually.
 
-**Important:** The consumer and provider examples use the installed plugin binary at `~/.pact/plugins/sse-0.1.0/`. Always rebuild and reinstall after code changes before running the examples.
+**Important:** The consumer and provider examples use the installed plugin binary at `~/.pact/plugins/sse-<version>/`. Always rebuild and reinstall after code changes before running the examples.
 
 ## SSE Plugin Notes
 
