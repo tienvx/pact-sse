@@ -382,32 +382,6 @@ pub fn setup_sse_contents(
     }
 }
 
-fn extract_retry(content: &str) -> Option<String> {
-    for line in content.lines() {
-        let line = line.trim_end_matches('\r');
-        if line.is_empty() {
-            break;
-        }
-        if let Some(value) = line.strip_prefix("retry:") {
-            return Some(value.strip_prefix(' ').unwrap_or(value).to_string());
-        }
-    }
-    None
-}
-
-fn extract_id(content: &str) -> Option<String> {
-    for line in content.lines() {
-        let line = line.trim_end_matches('\r');
-        if line.is_empty() {
-            break;
-        }
-        if let Some(value) = line.strip_prefix("id:") {
-            return Some(value.strip_prefix(' ').unwrap_or(value).to_string());
-        }
-    }
-    None
-}
-
 pub fn compare_sse_contents(
     expected_sse: &str,
     actual_sse: &str,
@@ -421,93 +395,6 @@ pub fn compare_sse_contents(
 
     let mut mismatches = Vec::new();
     let mut used_actual: std::collections::HashSet<usize> = std::collections::HashSet::new();
-
-    // Compare retry at stream level (raw parse from content)
-    let expected_retry = extract_retry(expected_sse);
-    let actual_retry = extract_retry(actual_sse);
-    match (&expected_retry, &actual_retry) {
-        (Some(exp_retry), Some(act_retry)) => {
-            if let Some(rule_list) = rules.get("retry") {
-                for rule in &rule_list.rules {
-                    if let Err(err) = exp_retry.matches_with(act_retry, rule, false) {
-                        mismatches.push(proto::ContentMismatch {
-                            expected: Some(exp_retry.as_bytes().to_vec()),
-                            actual: Some(act_retry.as_bytes().to_vec()),
-                            mismatch: err.to_string(),
-                            path: "retry".to_string(),
-                            diff: "".to_string(),
-                        });
-                    }
-                }
-            } else if exp_retry != act_retry {
-                mismatches.push(proto::ContentMismatch {
-                    expected: Some(exp_retry.as_bytes().to_vec()),
-                    actual: Some(act_retry.as_bytes().to_vec()),
-                    mismatch: format!(
-                        "Expected retry '{}', but got '{}'",
-                        exp_retry, act_retry
-                    ),
-                    path: "retry".to_string(),
-                    diff: "".to_string(),
-                });
-            }
-        }
-        (Some(exp_retry), None) => {
-            if rules.get("retry").is_none() {
-                mismatches.push(proto::ContentMismatch {
-                    expected: Some(exp_retry.as_bytes().to_vec()),
-                    actual: None,
-                    mismatch: format!("Expected retry '{}', but no retry found", exp_retry),
-                    path: "retry".to_string(),
-                    diff: "".to_string(),
-                });
-            }
-        }
-        (None, Some(_)) => {}
-        (None, None) => {}
-    }
-
-    // Compare id at stream level (raw parse from content)
-    let expected_id = extract_id(expected_sse);
-    let actual_id = extract_id(actual_sse);
-    match (&expected_id, &actual_id) {
-        (Some(exp_id), Some(act_id)) => {
-            if let Some(rule_list) = rules.get("id.*") {
-                for rule in &rule_list.rules {
-                    if let Err(err) = exp_id.matches_with(act_id, rule, false) {
-                        mismatches.push(proto::ContentMismatch {
-                            expected: Some(exp_id.as_bytes().to_vec()),
-                            actual: Some(act_id.as_bytes().to_vec()),
-                            mismatch: err.to_string(),
-                            path: "id".to_string(),
-                            diff: "".to_string(),
-                        });
-                    }
-                }
-            } else if exp_id != act_id {
-                mismatches.push(proto::ContentMismatch {
-                    expected: Some(exp_id.as_bytes().to_vec()),
-                    actual: Some(act_id.as_bytes().to_vec()),
-                    mismatch: format!("Expected id '{}', but got '{}'", exp_id, act_id),
-                    path: "id".to_string(),
-                    diff: "".to_string(),
-                });
-            }
-        }
-        (Some(exp_id), None) => {
-            if rules.get("id.*").is_none() {
-                mismatches.push(proto::ContentMismatch {
-                    expected: Some(exp_id.as_bytes().to_vec()),
-                    actual: None,
-                    mismatch: format!("Expected id '{}', but no id found", exp_id),
-                    path: "id".to_string(),
-                    diff: "".to_string(),
-                });
-            }
-        }
-        (None, Some(_)) => {}
-        (None, None) => {}
-    }
 
     for (exp_idx, exp) in expected_events.iter().enumerate() {
         let event_prefix = format!("event[{}]", exp_idx);
@@ -542,6 +429,46 @@ pub fn compare_sse_contents(
         }
     }
 
+    // Validate id and retry for unmatched actual events
+    for (act_idx, act) in actual_events.iter().enumerate() {
+        if used_actual.contains(&act_idx) {
+            continue;
+        }
+        let event_prefix = format!("event[{}]", act_idx);
+
+        if let Some(ref act_id) = act.id {
+            if let Some(rule_list) = rules.get("id.*") {
+                for rule in &rule_list.rules {
+                    if let Err(err) = act_id.matches_with(act_id, rule, false) {
+                        mismatches.push(proto::ContentMismatch {
+                            expected: None,
+                            actual: Some(act_id.as_bytes().to_vec()),
+                            mismatch: err.to_string(),
+                            path: format!("{}.id", event_prefix),
+                            diff: "".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some(ref act_retry) = act.retry {
+            if let Some(rule_list) = rules.get("retry") {
+                for rule in &rule_list.rules {
+                    if let Err(err) = act_retry.matches_with(act_retry, rule, false) {
+                        mismatches.push(proto::ContentMismatch {
+                            expected: None,
+                            actual: Some(act_retry.as_bytes().to_vec()),
+                            mismatch: err.to_string(),
+                            path: format!("{}.retry", event_prefix),
+                            diff: "".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
     Ok(Response::new(proto::CompareContentsResponse {
         error: String::default(),
         type_mismatch: None,
@@ -565,6 +492,40 @@ fn compare_event(
         .as_ref()
         .map(|t| format!(".{}.{}", t, "*"))
         .unwrap_or_else(|| ".*".to_string());
+
+    // Validate actual event's id against the id.* rule
+    if let Some(ref act_id) = act.id {
+        if let Some(rule_list) = rules.get("id.*") {
+            for rule in &rule_list.rules {
+                if let Err(err) = act_id.matches_with(act_id, rule, false) {
+                    mismatches.push(proto::ContentMismatch {
+                        expected: None,
+                        actual: Some(act_id.as_bytes().to_vec()),
+                        mismatch: err.to_string(),
+                        path: format!("{}.id", event_prefix),
+                        diff: "".to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    // Validate actual event's retry against the retry rule
+    if let Some(ref act_retry) = act.retry {
+        if let Some(rule_list) = rules.get("retry") {
+            for rule in &rule_list.rules {
+                if let Err(err) = act_retry.matches_with(act_retry, rule, false) {
+                    mismatches.push(proto::ContentMismatch {
+                        expected: None,
+                        actual: Some(act_retry.as_bytes().to_vec()),
+                        mismatch: err.to_string(),
+                        path: format!("{}.retry", event_prefix),
+                        diff: "".to_string(),
+                    });
+                }
+            }
+        }
+    }
 
     // Compare event types using the 'event' matching rule
     if let Some(ref exp_event_type) = exp.event_type {
@@ -651,7 +612,40 @@ fn compare_event(
         }
     }
 
- }
+    // Validate id and retry for unmatched actual events (events not matched to any expected event)
+    if exp.data.is_none() {
+        if let Some(ref act_id) = act.id {
+            if let Some(rule_list) = rules.get("id.*") {
+                for rule in &rule_list.rules {
+                    if let Err(err) = act_id.matches_with(act_id, rule, false) {
+                        mismatches.push(proto::ContentMismatch {
+                            expected: None,
+                            actual: Some(act_id.as_bytes().to_vec()),
+                            mismatch: err.to_string(),
+                            path: format!("{}.id", event_prefix),
+                            diff: "".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+        if let Some(ref act_retry) = act.retry {
+            if let Some(rule_list) = rules.get("retry") {
+                for rule in &rule_list.rules {
+                    if let Err(err) = act_retry.matches_with(act_retry, rule, false) {
+                        mismatches.push(proto::ContentMismatch {
+                            expected: None,
+                            actual: Some(act_retry.as_bytes().to_vec()),
+                            mismatch: err.to_string(),
+                            path: format!("{}.retry", event_prefix),
+                            diff: "".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+}
 
 pub fn generate_sse_content(
     request: &Request<proto::GenerateContentRequest>,
