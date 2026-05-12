@@ -102,9 +102,14 @@ pub fn setup_sse_contents(
                     FieldKey,
                 )>,
             > = Vec::new();
-            let mut event_md: Option<pact_models::matchingrules::expressions::MatchingRuleDefinition> = None;
-            let mut retry_md: Option<pact_models::matchingrules::expressions::MatchingRuleDefinition> = None;
-            let mut id_md: Option<pact_models::matchingrules::expressions::MatchingRuleDefinition> = None;
+            let mut event_md: Option<
+                pact_models::matchingrules::expressions::MatchingRuleDefinition,
+            > = None;
+            let mut retry_md: Option<
+                pact_models::matchingrules::expressions::MatchingRuleDefinition,
+            > = None;
+            let mut id_md: Option<pact_models::matchingrules::expressions::MatchingRuleDefinition> =
+                None;
 
             for (key, value) in &config.fields {
                 let field_key = parse_field(key)?;
@@ -590,10 +595,7 @@ fn compare_event(
                 mismatches.push(proto::ContentMismatch {
                     expected: Some(exp_data.as_bytes().to_vec()),
                     actual: Some(act_data.as_bytes().to_vec()),
-                    mismatch: format!(
-                        "Expected data '{}', but got '{}'",
-                        exp_data, act_data
-                    ),
+                    mismatch: format!("Expected data '{}', but got '{}'", exp_data, act_data),
                     path: format!("{}.data", event_prefix),
                     diff: "".to_string(),
                 });
@@ -602,10 +604,7 @@ fn compare_event(
             mismatches.push(proto::ContentMismatch {
                 expected: Some(exp_data.as_bytes().to_vec()),
                 actual: None,
-                mismatch: format!(
-                    "Expected data '{}', but event has no data",
-                    exp_data
-                ),
+                mismatch: format!("Expected data '{}', but event has no data", exp_data),
                 path: format!("{}.data", event_prefix),
                 diff: "".to_string(),
             });
