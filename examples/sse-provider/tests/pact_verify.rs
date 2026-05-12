@@ -61,8 +61,8 @@ async fn verify_sse_provider() {
                 actix_web::App::new().route(
                     "/events",
                     actix_web::web::get().to(|| async {
-                        let sse_data = "id:901
-retry:20
+                        let sse_data = "id:100
+retry:3000
 
 data: I am
 
