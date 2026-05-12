@@ -74,12 +74,17 @@ data: I have many books
 event:count
 data:12
 
-data: I love this book. I read it many times
+data: I love this book.
+data: I read it many times
 
 event:count
 data:34
 
+id: 101
+
 data: Last time I read it
+
+retry: 200
 
 event:time
 data:2015-02-21
