@@ -41,9 +41,10 @@ jobs:
 
       - name: Install Plugin
         run: |
-          mkdir -p ~/.pact/plugins/sse-0.1.0
-          cp target/release/pact-sse-plugin ~/.pact/plugins/sse-0.1.0/
-          cp pact-plugin.json ~/.pact/plugins/sse-0.1.0/
+          VERSION=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
+          mkdir -p ~/.pact/plugins/sse-$VERSION
+          cp target/release/pact-sse-plugin ~/.pact/plugins/sse-$VERSION/
+          cp pact-plugin.json ~/.pact/plugins/sse-$VERSION/
         shell: bash
 
       - name: Run tests (unit)
